@@ -1,6 +1,7 @@
-// Знаходимо елементи на сторінці
+// Знаходимо всі елементи, включаючи новий інпут
 const processButton = document.getElementById('processButton');
 const audioFileInput = document.getElementById('audioFile');
+const durationInput = document.getElementById('durationInput'); // Новий елемент
 const resultsDiv = document.getElementById('results');
 const spinner = processButton.querySelector('.spinner-border');
 const progressContainer = document.getElementById('progressContainer');
@@ -9,40 +10,30 @@ const progressText = document.getElementById('progressText');
 
 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-// --- НОВА ВБУДОВАНА ФУНКЦІЯ ДЛЯ КОНВЕРТАЦІЇ В WAV ---
-// Вона замінює зовнішню бібліотеку audiobuffer-to-wav
+// Функція для конвертації в WAV (без змін)
 function bufferToWav(aBuffer) {
     const numOfChan = aBuffer.numberOfChannels;
-    const
-        length = aBuffer.length * numOfChan * 2 + 44;
-    const
-        buffer = new ArrayBuffer(length);
-    const
-        view = new DataView(buffer);
-    const
-        channels = [];
+    const length = aBuffer.length * numOfChan * 2 + 44;
+    const buffer = new ArrayBuffer(length);
+    const view = new DataView(buffer);
+    const channels = [];
     let i, sample;
-    let offset = 0;
-    let pos = 0;
+    let offset = 0, pos = 0;
 
-    // Записуємо WAVE-заголовок
     setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8); // file length - 8
+    setUint32(length - 8);
     setUint32(0x45564157); // "WAVE"
-
-    setUint32(0x20746d66); // "fmt " chunk
-    setUint32(16); // length = 16
-    setUint16(1); // PCM (uncompressed)
+    setUint32(0x20746d66); // "fmt "
+    setUint32(16);
+    setUint16(1);
     setUint16(numOfChan);
     setUint32(aBuffer.sampleRate);
-    setUint32(aBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2); // block-align
-    setUint16(16); // 16-bit
+    setUint32(aBuffer.sampleRate * 2 * numOfChan);
+    setUint16(numOfChan * 2);
+    setUint16(16);
+    setUint32(0x61746164); // "data"
+    setUint32(length - pos - 4);
 
-    setUint32(0x61746164); // "data" - chunk
-    setUint32(length - pos - 4); // chunk length
-
-    // Записуємо дані каналів
     for (i = 0; i < aBuffer.numberOfChannels; i++)
         channels.push(aBuffer.getChannelData(i));
 
@@ -55,22 +46,12 @@ function bufferToWav(aBuffer) {
         }
         offset++;
     }
-
     return buffer;
 
-    function setUint16(data) {
-        view.setUint16(pos, data, true);
-        pos += 2;
-    }
-
-    function setUint32(data) {
-        view.setUint32(pos, data, true);
-        pos += 4;
-    }
+    function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+    function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 }
 
-
-// --- ОСНОВНА ЛОГІКА ДОДАТКУ (залишається майже без змін) ---
 processButton.addEventListener('click', async () => {
     const file = audioFileInput.files[0];
     if (!file) {
@@ -78,13 +59,20 @@ processButton.addEventListener('click', async () => {
         return;
     }
 
+    // --- ОНОВЛЕНА ЛОГІКА: Отримання та перевірка тривалості ---
+    const chunkDurationInMinutes = parseInt(durationInput.value, 10);
+    if (!chunkDurationInMinutes || chunkDurationInMinutes <= 0) {
+        alert('Будь ласка, введіть коректну тривалість (більше 0).');
+        return;
+    }
+    const chunkDurationInSeconds = chunkDurationInMinutes * 60;
+
+    // --- Підготовка інтерфейсу ---
     spinner.style.display = 'inline-block';
     processButton.disabled = true;
     resultsDiv.innerHTML = '';
-    
     progressContainer.style.display = 'block';
     progressBar.style.width = '0%';
-    progressBar.textContent = '';
     progressText.textContent = 'Підготовка до обробки...';
     progressBar.classList.add('progress-bar-animated');
 
@@ -93,10 +81,11 @@ processButton.addEventListener('click', async () => {
         const originalAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
         const totalDuration = originalAudioBuffer.duration;
-        const chunkDuration = 20 * 60;
         const sampleRate = originalAudioBuffer.sampleRate;
         const numberOfChannels = originalAudioBuffer.numberOfChannels;
-        const totalChunks = Math.ceil(totalDuration / chunkDuration);
+        
+        // Використовуємо значення, введене користувачем
+        const totalChunks = Math.ceil(totalDuration / chunkDurationInSeconds);
         
         let startTime = 0;
         let chunkIndex = 1;
@@ -108,7 +97,7 @@ processButton.addEventListener('click', async () => {
 
             await new Promise(resolve => setTimeout(resolve, 10));
 
-            const endTime = Math.min(startTime + chunkDuration, totalDuration);
+            const endTime = Math.min(startTime + chunkDurationInSeconds, totalDuration);
             const segmentDuration = endTime - startTime;
 
             const chunkBuffer = audioContext.createBuffer(
@@ -119,13 +108,12 @@ processButton.addEventListener('click', async () => {
 
             for (let i = 0; i < numberOfChannels; i++) {
                 const channelData = originalAudioBuffer.getChannelData(i);
-                const chunkChannelData = chunkBuffer.getChannelData(i);
-                const startSample = Math.floor(startTime * sampleRate);
-                const endSample = Math.floor(endTime * sampleRate);
-                chunkChannelData.set(channelData.subarray(startSample, endSample));
+                chunkBuffer.getChannelData(i).set(channelData.subarray(
+                    Math.floor(startTime * sampleRate),
+                    Math.floor(endTime * sampleRate)
+                ));
             }
 
-            // ВИКЛИКАЄМО НАШУ НОВУ ВБУДОВАНУ ФУНКЦІЮ
             const wavData = bufferToWav(chunkBuffer);
             const blob = new Blob([wavData], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
@@ -137,7 +125,7 @@ processButton.addEventListener('click', async () => {
             link.textContent = `Завантажити частину ${chunkIndex}`;
             resultsDiv.appendChild(link);
             
-            startTime += chunkDuration;
+            startTime += chunkDurationInSeconds;
             chunkIndex++;
         }
         
@@ -147,7 +135,7 @@ processButton.addEventListener('click', async () => {
 
     } catch (error) {
         console.error('Помилка обробки файлу:', error);
-        resultsDiv.innerHTML = `<div class="alert alert-danger">Виникла помилка: ${error.message}</div>`;
+        resultsDiv.innerHTML = `<div class="alert alert-danger">Виникла помилка: ${error.message}. Можливо, формат файлу не підтримується вашим браузером.</div>`;
         progressContainer.style.display = 'none';
     } finally {
         spinner.style.display = 'none';
