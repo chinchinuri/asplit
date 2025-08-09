@@ -135,7 +135,31 @@ processButton.addEventListener('click', async () => {
 
     } catch (error) {
         console.error('Помилка обробки файлу:', error);
-        resultsDiv.innerHTML = `<div class="alert alert-danger">Виникла помилка: ${error.message}. Можливо, формат файлу не підтримується вашим браузером.</div>`;
+
+        // Створюємо більш детальне повідомлення про помилку
+        let errorMessage = `<div class="alert alert-danger">Виникла помилка: ${error.message}.</div>`;
+
+        if (error.name === 'DOMException' && error.message.includes('decode')) {
+            errorMessage = `
+                <div class="alert alert-warning">
+                    <h4 class="alert-heading">Не вдалося розкодувати аудіофайл!</h4>
+                    <p>
+                        Основна причина — ваш браузер не може обробити аудіокодек всередині файлу (особливо актуально для .m4a, .aac).
+                        Це обмеження залежить від вашого браузера та операційної системи.
+                    </p>
+                    <hr>
+                    <p class="mb-0">
+                        <b>Що можна зробити:</b>
+                        <ol>
+                            <li>Найбільш надійний спосіб: сконвертуйте файл у формат <b>WAV</b> або <b>MP3</b> за допомогою будь-якої програми (наприклад, безкоштовної VLC Media Player) і спробуйте ще раз.</li>
+                            <li>Спробуйте відкрити цю сторінку та ваш файл в іншому браузері (наприклад, <b>Safari</b> на macOS часто має кращу підтримку).</li>
+                        </ol>
+                    </p>
+                </div>
+            `;
+        }
+
+        resultsDiv.innerHTML = errorMessage;
         progressContainer.style.display = 'none';
     } finally {
         spinner.style.display = 'none';
